@@ -1,20 +1,22 @@
 [project]
-name = "manhwa-russifier"
-version = "1.0.0"
-description = "A complete pipeline for automatic russification of manhwa: text detection, OCR, translation, replacement, and rendering."
+name = "en-manhwa-russifier"
+version = "2.0.0"
+description = "A complete pipeline for automatic russification of English manhwa: text detection, OCR, translation, replacement, and rendering."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "ultralytics>=8.0.0,<9.0.0",
-    "easyocr>=1.7.0,<2.0.0",
-	"googletrans>=4.0.0,<5.0.0",
-    "torch>=2.0.0,<3.0.0",
-    "torchvision>=0.15.0,<1.0.0",
-    "opencv-python>=4.8.0,<5.0.0",
-    "numpy>=1.24.0,<3.0.0",
-    "pillow>=10.0.0,<11.0.0",
-    "py7zr>=0.20.0,<1.0.0",
-    "git+https://github.com/KvaytG/caption-forge.git@d35e91c2e59cbea40322469e032c02703df869fc",
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0.0",
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "transformers>=4.36.0",
+    "onnxruntime>=1.16.0",
+    "huggingface_hub>=0.19.0",
+    "py7zr>=0.20.0",
+    "caption-forge @ git+https://github.com/KvaytG/caption-forge.git",
+    "en-ru-translator @ git+https://github.com/KvaytG/en-ru-translator.git",
+    "simple-image-inpainter @ git+https://github.com/KvaytG/simple-image-inpainter.git",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,9 @@ dev = [
     "black>=24.0.0,<25.0.0",
     "mypy>=1.8.0,<2.0.0",
     "flake8>=7.0.0,<8.0.0",
+]
+gpu = [
+    "onnxruntime-gpu",
 ]
 
 [build-system]
