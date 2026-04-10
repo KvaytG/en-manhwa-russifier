@@ -29,11 +29,12 @@ class ManhwaRussifier:
         # 2. OCR (Чтение текста)
         start = time.perf_counter()
         self.reader.fill_pages_data(pages)
+        logger.info(f"OCR finished: {time.perf_counter() - start:.3f}s")
+        # 2.5 Для лучшего перевода
         for page in pages:
             for it in page.image_texts:
                 if it.extracted_text:
                     it.extracted_text = it.extracted_text.lower()
-        logger.info(f"OCR finished: {time.perf_counter() - start:.3f}s")
         # 3. Перевод
         start = time.perf_counter()
         self.translator.translate_pages(pages)

@@ -1,12 +1,13 @@
 import os
 import cv2
-import torch
 import numpy as np
-from collections import OrderedDict
+import onnxruntime as ort
+import torch
 from PIL import Image
 from huggingface_hub import hf_hub_download
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-from ..viewer import Page
+from optimum.onnxruntime import ORTModelForVision2Seq
+from transformers import TrOCRProcessor
+from .viewer import Page
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import transformers
@@ -17,48 +18,40 @@ transformers.logging.set_verbosity_error()
 class ManhwaReader:
     def __init__(self,
                  gpu: bool,
-                 trocr_model_name: str = "microsoft/trocr-base-printed",
                  batch_size: int = 16):
-        self.device = torch.device('cuda' if gpu and torch.cuda.is_available() else 'cpu')
-        craft_path = hf_hub_download(
-            repo_id="Manbehindthemadness/craft_mlt_25k",
-            filename="craft_mlt_25k.pth"
-        )
-        self.craft_model = self._load_craft(craft_path)
-        self.processor = TrOCRProcessor.from_pretrained(trocr_model_name)
-        self.trocr_model = VisionEncoderDecoderModel.from_pretrained(trocr_model_name).to(self.device)
-        self.craft_target_size = 768
+        trocr_repo = "KvaytG/trocr-base-printed-onnx"
+        craft_repo = "KvaytG/craft-mlt-25k-onnx"
         self.batch_size = batch_size
-
-    def _load_craft(self, weights_path):
-        from .craft import CRAFT
-        net = CRAFT(pretrained=False)
-        state_dict = torch.load(weights_path, map_location=self.device)
-        new_state_dict = OrderedDict((k.replace('module.', ''), v) for k, v in state_dict.items())
-        net.load_state_dict(new_state_dict)
-        return net.to(self.device).eval()
+        self.providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if gpu else ['CPUExecutionProvider']
+        self.device = "cuda" if gpu else "cpu"
+        craft_path = hf_hub_download(repo_id=craft_repo, filename="craft.onnx")
+        self.craft_session = ort.InferenceSession(craft_path, providers=self.providers)
+        self.craft_input_name = self.craft_session.get_inputs()[0].name
+        self.processor = TrOCRProcessor.from_pretrained(trocr_repo)
+        self.trocr_model = ORTModelForVision2Seq.from_pretrained(
+            trocr_repo,
+            providers=self.providers,
+            use_cache=True,
+            decoder_file_name="decoder_model.onnx",
+            decoder_with_past_file_name="decoder_with_past_model.onnx"
+        )
 
     def _get_craft_segments(self, roi, offset):
         x_off, y_off = offset
         h_roi, w_roi = roi.shape[:2]
-        target_h = int(np.ceil(h_roi / 32) * 32)
-        target_w = int(np.ceil(w_roi / 32) * 32)
+        target_h, target_w = int(np.ceil(h_roi / 32) * 32), int(np.ceil(w_roi / 32) * 32)
         img_resized = cv2.resize(roi, (target_w, target_h))
-        img_pt = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0).to(self.device)
-        img_pt = img_pt / 255.0
-        with torch.no_grad():
-            y_out, _ = self.craft_model(img_pt)
-        score_text = y_out[0, :, :, 0].cpu().numpy()
-        score_text = cv2.resize(score_text, (w_roi, h_roi))
+        img_in = img_resized.transpose(2, 0, 1).astype(np.float32)
+        img_in = np.expand_dims(img_in, axis=0) / 255.0
+        y_out = self.craft_session.run(None, {self.craft_input_name: img_in})[0]
+        score_text = cv2.resize(y_out[0, :, :, 0], (w_roi, h_roi))
         _, thresh = cv2.threshold(score_text, 0.25, 1.0, cv2.THRESH_BINARY)
         thresh = (thresh * 255).astype(np.uint8)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 3))
-        thresh = cv2.dilate(thresh, kernel, iterations=1)
+        thresh = cv2.dilate(thresh, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 3)), iterations=1)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         segments = []
         for cnt in contours:
-            if cv2.contourArea(cnt) < 5:
-                continue
+            if cv2.contourArea(cnt) < 5: continue
             cnt_flat = cnt.reshape(-1, 2).astype(np.float32)
             cnt_flat[:, 0] += x_off
             cnt_flat[:, 1] += y_off
@@ -66,15 +59,18 @@ class ManhwaReader:
         return segments
 
     def _batch_ocr(self, image_crops: list[np.ndarray]) -> list[str]:
-        if not image_crops:
-            return []
+        if not image_crops: return []
         results = []
         for i in range(0, len(image_crops), self.batch_size):
             batch = image_crops[i: i + self.batch_size]
             pil_images = [Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)) for img in batch]
             inputs = self.processor(images=pil_images, return_tensors="pt").to(self.device)
             with torch.no_grad():
-                generated_ids = self.trocr_model.generate(inputs.pixel_values, max_new_tokens=64)
+                generated_ids = self.trocr_model.generate(
+                    inputs.pixel_values,
+                    max_new_tokens=64,
+                    use_cache=True
+                )
             texts = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
             results.extend([t.strip() for t in texts])
         return results
