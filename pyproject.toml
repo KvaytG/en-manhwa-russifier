@@ -1,6 +1,6 @@
 [project]
 name = "en-manhwa-russifier"
-version = "2.1.0"
+version = "2.1.1"
 description = "A complete pipeline for automatic russification of English manhwa: text detection, OCR, translation, replacement, and rendering."
 readme = "README.md"
 requires-python = ">=3.11"
