@@ -35,6 +35,8 @@ class ManhwaReader:
             decoder_file_name="decoder_model.onnx",
             decoder_with_past_file_name="decoder_with_past_model.onnx"
         )
+        if not hasattr(self.trocr_model, "_supports_cache_class"):
+            self.trocr_model._supports_cache_class = False
 
     def _get_craft_segments(self, roi, offset):
         x_off, y_off = offset
